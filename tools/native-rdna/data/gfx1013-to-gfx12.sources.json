@@ -1,0 +1,29 @@
+{
+  "generator": "tools/native-rdna/opcode_map.py",
+  "inventory": "tools/rdna_isa.txt",
+  "license": "Derived from the AMD Machine-Readable GPU ISA Specification, https://gpuopen.com/machine-readable-isa/. Copyright (c) 2026 Advanced Micro Devices, Inc., or its affiliates. MIT License.",
+  "sources": {
+    "rdna1": {
+      "file": "amdgpu_isa_rdna1.xml",
+      "sha256": "f60248605e8c4cb9ae29130ce3114142467d953a3f1c57a1b0ca6d8de014e722",
+      "architecture": "AMD RDNA 1"
+    },
+    "rdna2": {
+      "file": "amdgpu_isa_rdna2.xml",
+      "sha256": "d671ecbc36543674ab59e9b2feffd56718fd2137e7ad913c314f2e2508b9f4f7",
+      "architecture": "AMD RDNA 2"
+    },
+    "rdna4": {
+      "file": "amdgpu_isa_rdna4.xml",
+      "sha256": "f8a290c8471e26a1071b08b61a33e4d9efa46ec6cedcdb8e5ba57d7969b60692",
+      "architecture": "AMD RDNA 4"
+    }
+  },
+  "summary": {
+    "renamed": 325,
+    "removed": 149,
+    "renumbered": 503,
+    "identical": 188,
+    "unresolved": 1
+  }
+}

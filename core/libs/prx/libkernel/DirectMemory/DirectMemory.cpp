@@ -1,4 +1,5 @@
 #include "prx/libkernel/DirectMemory/DirectMemory.hpp"
+#include "prx/libkernel/DirectMemory/MemoryCensus.hpp"
 #include "prx/libc/include/GuestAllocations.hpp"
 #include "prx/libc/include/GuestArena.hpp"
 #include "prx/libc/include/GuestWriteWatch.hpp"
@@ -645,7 +646,7 @@ bool FixedNoOverwriteConflict(const GuestAllocations::Mutation& mutation, void* 
     return mutation.Overlaps(addr, len) && !Reserved(addr, len);
 }
 
-int DoMapDirect(void** addr, size_t len, int prot, int flags, int64_t physStart, size_t alignment) {
+static int mapDirect(void** addr, size_t len, int prot, int flags, int64_t physStart, size_t alignment) {
     ValidateOutput(addr);
     if (len == 0 || (len & (PS5_PAGE_SIZE - 1)) != 0) return SCE_KERNEL_ERROR_EINVAL;
     if (physStart < 0 || (static_cast<std::uint64_t>(physStart) & (PS5_PAGE_SIZE - 1)) != 0 || static_cast<std::uint64_t>(physStart) >= DIRECT_MEMORY_SIZE || len > DIRECT_MEMORY_SIZE - static_cast<std::uint64_t>(physStart)) {
@@ -677,7 +678,7 @@ int DoMapDirect(void** addr, size_t len, int prot, int flags, int64_t physStart,
     return 0;
 }
 
-int DoMapAnon(void** addr, size_t len, int prot, int flags) {
+static int mapAnon(void** addr, size_t len, int prot, int flags) {
     ValidateOutput(addr);
     if (len == 0 || (len & (PS5_PAGE_SIZE - 1)) != 0) return SCE_KERNEL_ERROR_EINVAL;
     GuestAllocations::Mutation mutation;
@@ -702,7 +703,7 @@ int DoMapAnon(void** addr, size_t len, int prot, int flags) {
     return 0;
 }
 
-int DoMprotect(const void* addr, size_t len, int prot) {
+static int protectRange(const void* addr, size_t len, int prot) {
     Trace("protect %p+0x%zx prot=0x%x", addr, len, prot);
     const auto address = reinterpret_cast<std::uintptr_t>(addr);
     constexpr auto pageMask = static_cast<std::uintptr_t>(PS5_PAGE_SIZE - 1);
@@ -731,8 +732,8 @@ int DoMprotect(const void* addr, size_t len, int prot) {
     return 0;
 }
 
-int DoMtypeprotect(const void* addr, size_t len, int type, int prot) {
-    const int result = DoMprotect(addr, len, prot);
+static int typeProtectRange(const void* addr, size_t len, int type, int prot) {
+    const int result = protectRange(addr, len, prot);
     const auto address = reinterpret_cast<std::uintptr_t>(addr);
     constexpr auto pageMask = static_cast<std::uintptr_t>(PS5_PAGE_SIZE - 1);
     const auto first = address & ~pageMask;
@@ -758,7 +759,7 @@ int DoMtypeprotect(const void* addr, size_t len, int type, int prot) {
     return result;
 }
 
-int DoMunmap(void* addr, size_t len) {
+static int unmapRange(void* addr, size_t len) {
     Trace("unmap %p+0x%zx", addr, len);
     if (len == 0 || (len & (PS5_PAGE_SIZE - 1)) != 0 || !addr) return SCE_KERNEL_ERROR_EINVAL;
     GuestAllocations::Mutation mutation;
@@ -853,4 +854,44 @@ bool QueryDirectMapping(std::uintptr_t address, std::uintptr_t* start, std::uint
     *offset = it->second.phys;
     *memoryType = it->second.memoryType;
     return true;
+}
+
+static int physicalMemoryType(int64_t physical) {
+    int64_t start = 0;
+    int64_t end = 0;
+    int memoryType = MemoryCensus::UnknownMemoryType;
+    if (!DirectMemoryFind(physical, false, &start, &end, &memoryType)) return MemoryCensus::UnknownMemoryType;
+    return memoryType;
+}
+
+int DoMapDirect(void** addr, size_t len, int prot, int flags, int64_t physStart, size_t alignment) {
+    const void* requested = addr != nullptr ? *addr : nullptr;
+    const int result = mapDirect(addr, len, prot, flags, physStart, alignment);
+    if (MemoryCensus::Enabled()) MemoryCensus::MapDirect(requested, result == 0 ? *addr : nullptr, len, prot, flags, physStart, physicalMemoryType(physStart), result);
+    return result;
+}
+
+int DoMapAnon(void** addr, size_t len, int prot, int flags) {
+    const void* requested = addr != nullptr ? *addr : nullptr;
+    const int result = mapAnon(addr, len, prot, flags);
+    if (MemoryCensus::Enabled()) MemoryCensus::MapFlexible(requested, result == 0 ? *addr : nullptr, len, prot, flags, result);
+    return result;
+}
+
+int DoMprotect(const void* addr, size_t len, int prot) {
+    const int result = protectRange(addr, len, prot);
+    if (MemoryCensus::Enabled()) MemoryCensus::Protect(addr, len, prot, result);
+    return result;
+}
+
+int DoMtypeprotect(const void* addr, size_t len, int type, int prot) {
+    const int result = typeProtectRange(addr, len, type, prot);
+    if (MemoryCensus::Enabled()) MemoryCensus::TypeProtect(addr, len, type, prot, result);
+    return result;
+}
+
+int DoMunmap(void* addr, size_t len) {
+    const int result = unmapRange(addr, len);
+    if (MemoryCensus::Enabled()) MemoryCensus::Unmap(addr, len, result);
+    return result;
 }

@@ -1,5 +1,6 @@
 #include "prx/libkernel/DirectMemory/MemoryPool.hpp"
 #include "prx/libkernel/DirectMemory/DirectMemory.hpp"
+#include "prx/libkernel/DirectMemory/MemoryCensus.hpp"
 #include <algorithm>
 #include <map>
 #include <mutex>
@@ -126,11 +127,14 @@ private:
 };
 
 int DirectMemoryAlloc(int64_t searchStart, int64_t searchEnd, size_t len, size_t alignment, int memoryType, int64_t* physOut) {
-    return PhysicalMemoryPool::Instance().Alloc(searchStart, searchEnd, len, alignment, memoryType, physOut);
+    const int result = PhysicalMemoryPool::Instance().Alloc(searchStart, searchEnd, len, alignment, memoryType, physOut);
+    if (MemoryCensus::Enabled()) MemoryCensus::Allocate(result == 0 && physOut != nullptr ? *physOut : -1, len, memoryType, result);
+    return result;
 }
 
 void DirectMemoryFree(int64_t start, size_t len) {
     PhysicalMemoryPool::Instance().Free(static_cast<uint64_t>(start), len);
+    if (MemoryCensus::Enabled()) MemoryCensus::Release(start, len);
 }
 
 bool DirectMemoryCheckedFree(int64_t start, size_t len) {

@@ -62,5 +62,51 @@ class FloatModeTests(unittest.TestCase):
         self.assertEqual(assemble.call_args.kwargs, MODES)
 
 
+
+GFX12_MODES = MODES | {"ieee": 0, "dx10_clamp": 0}
+
+
+def amdgpu_toolchain():
+    for name in ("clang", "ld.lld"):
+        if hw_oracle.shutil.which(name) is None:
+            return False
+    probe = hw_oracle.subprocess.run([hw_oracle.shutil.which("clang"), "-print-targets"], capture_output=True, text=True)
+    return "amdgcn" in probe.stdout
+
+
+class TargetTemplateTests(unittest.TestCase):
+    def test_template_follows_the_target(self):
+        self.assertEqual(hw_oracle.template_for("gfx1013").name, "template.s")
+        self.assertEqual(hw_oracle.template_for("gfx1031").name, "template.s")
+        self.assertEqual(hw_oracle.template_for("gfx1201").name, "template_gfx12.s")
+        gfx12 = hw_oracle.template_for("gfx1201").read_text()
+        self.assertIn("s_wait_kmcnt", gfx12)
+        self.assertNotIn("s_waitcnt", gfx12)
+        self.assertNotIn("amdhsa_ieee_mode", gfx12)
+        self.assertNotIn("amdhsa_dx10_clamp", gfx12)
+
+    def test_gfx12_rejects_mode_bits_it_does_not_have(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(hw_oracle, "target", return_value="gfx1201"), patch.object(hw_oracle.subprocess, "run") as run:
+            for name in ("ieee", "dx10_clamp"):
+                with self.subTest(name=name), self.assertRaisesRegex(ValueError, "IEEE_MODE or DX10_CLAMP"):
+                    hw_oracle.assemble("s_nop 0", Path(tmp), False, **(GFX12_MODES | {name: 1}))
+            run.assert_not_called()
+
+    def test_gfx12_writes_the_gfx12_template(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(hw_oracle, "target", return_value="gfx1201"), patch.object(hw_oracle.subprocess, "run"), patch.object(hw_oracle, "tool", side_effect=lambda name: name):
+            hw_oracle.assemble("v_mov_b32 v10, v4", Path(tmp), False, **GFX12_MODES)
+            source = (Path(tmp) / "k.s").read_text()
+        self.assertIn('amdgcn-amd-amdhsa--gfx1201', source)
+        self.assertIn("v_mov_b32 v10, v4", source)
+        self.assertNotIn("@", source.replace("@function", ""))
+
+    @unittest.skipUnless(amdgpu_toolchain(), "clang and ld.lld with the AMDGPU target are needed")
+    def test_templates_assemble(self):
+        for target_name, modes in (("gfx1013", MODES), ("gfx1201", GFX12_MODES)):
+            with self.subTest(target=target_name), tempfile.TemporaryDirectory() as tmp, patch.object(hw_oracle, "target", return_value=target_name):
+                code = hw_oracle.assemble("v_mov_b32 v10, v4", Path(tmp), False, **modes)
+                self.assertGreater(code.stat().st_size, 0)
+
+
 if __name__ == "__main__":
     unittest.main()

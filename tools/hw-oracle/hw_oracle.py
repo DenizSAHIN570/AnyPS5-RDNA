@@ -50,6 +50,10 @@ def target():
     return os.environ.get("HW_ORACLE_TARGET") or subprocess.run([oracle(), "--target"], capture_output=True, text=True, check=True).stdout.strip()
 
 
+def template_for(target_name):
+    return HERE / ("template_gfx12.s" if target_name.startswith("gfx12") else "template.s")
+
+
 def assemble(body, work, wave64, *, ieee, denorm32, denorm16, dx10_clamp, round32, round16, fp16_overflow):
     modes = (("ieee", ieee, 2), ("denorm32", denorm32, 4), ("denorm16", denorm16, 4),
              ("dx10_clamp", dx10_clamp, 2), ("round32", round32, 4), ("round16", round16, 4),
@@ -57,7 +61,9 @@ def assemble(body, work, wave64, *, ieee, denorm32, denorm16, dx10_clamp, round3
     for name, value, limit in modes:
         if not isinstance(value, int) or value not in range(limit):
             raise ValueError(f"{name} must be an integer from 0 to {limit - 1}")
-    text = (HERE / "template.s").read_text()
+    if target().startswith("gfx12") and (ieee or dx10_clamp):
+        raise ValueError(f"{target()} kernels have no IEEE_MODE or DX10_CLAMP bits: pass ieee=0 and dx10_clamp=0")
+    text = template_for(target()).read_text()
     for key, value in (("@TARGET@", target()), ("@WAVE32@", "0" if wave64 else "1"), ("@WAVESIZE@", "64" if wave64 else "32"),
                        ("@DENORM@", str(int(denorm32))), ("@DENORM16@", str(int(denorm16))), ("@IEEE@", str(int(ieee))),
                        ("@DX10_CLAMP@", str(int(dx10_clamp))), ("@ROUND32@", str(int(round32))), ("@ROUND16@", str(int(round16))),
@@ -106,10 +112,18 @@ def main():
     parser.add_argument("--coarse", action="store_true", help="input and output in coarse-grained GPU memory")
     parser.add_argument("--extra", type=Path, help="bytes appended after the rows")
     parser.add_argument("--outs", type=int, choices=range(1, 17), default=16, metavar="N", help="print v10..v(10+N-1)")
+    parser.add_argument("--assemble-only", type=Path, metavar="CODE_OBJECT", help="only assemble the kernel and write the code object here (no GPU needed with HW_ORACLE_TARGET)")
     args = parser.parse_args()
     rows = [tuple(int(v, 0) for v in line.split()) for line in args.rows.read_text().splitlines() if line.strip()]
     if any(len(r) != 4 for r in rows):
         sys.exit("every row needs 4 values")
+    if args.assemble_only:
+        with tempfile.TemporaryDirectory() as tmp:
+            code = assemble(args.body.read_text(), Path(tmp), args.wave64, ieee=args.ieee, denorm32=args.denorm32, denorm16=args.denorm16,
+                            dx10_clamp=args.dx10_clamp, round32=args.round32, round16=args.round16, fp16_overflow=args.fp16_overflow)
+            shutil.copyfile(code, args.assemble_only)
+        print(f"{target()}: {args.assemble_only}")
+        return
     extra = args.extra.read_bytes() if args.extra else b""
     for result in run(args.body.read_text(), rows, extra, args.wave64, args.coarse,
                       ieee=args.ieee, denorm32=args.denorm32, denorm16=args.denorm16,

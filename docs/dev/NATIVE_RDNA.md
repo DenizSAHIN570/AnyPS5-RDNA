@@ -2,6 +2,8 @@
 
 Tools for the two proposals of this fork: a native gfx12 (RDNA4) GPU path ([#1](https://github.com/DenizSAHIN570/AnyPS5-RDNA/issues/1)) and guest memory placed in CPU-visible VRAM ([#2](https://github.com/DenizSAHIN570/AnyPS5-RDNA/issues/2)). The target is a Radeon RX 9070 XT (gfx1201) on Linux with RADV. Nothing here changes how a title runs unless one of the environment switches below is set.
 
+What is done and what to do next: [NATIVE_RDNA_NEXT.md](NATIVE_RDNA_NEXT.md).
+
 ## Environment switches
 
 | Switch | Library | Effect |
